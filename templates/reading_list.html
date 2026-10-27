@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "macros.html" import book_card %}
+
+{% block title %}OpenShelf · Reading list{% endblock %}
+
+{% block content %}
+<section class="welcome-panel">
+    <p class="eyebrow">Library</p>
+    <h1>My reading list</h1>
+    <p class="lead-text">Books you have saved to read later.</p>
+</section>
+
+{% if books %}
+<div class="row g-4 book-grid">
+    {% for book in books %}
+    <div class="col-sm-6 col-xl-3">
+        {{ book_card(book) }}
+        <form method="post" action="{{ url_for('toggle_reading_list', book_id=book.id) }}" class="mt-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="action" value="remove">
+            <input type="hidden" name="next" value="list">
+            <button class="btn btn-ghost w-100" type="submit">Remove</button>
+        </form>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <p>Your reading list is empty.</p>
+    <a class="btn btn-accent" href="{{ url_for('books') }}">Browse books</a>
+</div>
+{% endif %}
+{% endblock %}

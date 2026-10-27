@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}OpenShelf · My reviews{% endblock %}
+
+{% block content %}
+<section class="welcome-panel">
+    <p class="eyebrow">Library</p>
+    <h1>My reviews</h1>
+    <p class="lead-text">Reviews you have written, including those still waiting for approval.</p>
+</section>
+
+{% if reviews %}
+<div class="review-list">
+    {% for review in reviews %}
+    <article class="review-card">
+        <p class="genre-chip">{{ review.status }}</p>
+        <h2><a href="{{ url_for('book_detail', book_id=review.book_id) }}">{{ review.title }}</a></h2>
+        <p class="author">{{ review.author }} · ★ {{ review.rating }}</p>
+        <p class="review-text">{{ review.review_text }}</p>
+        <p class="review-meta">Updated {{ review.updated_at.strftime('%d %b %Y') }}</p>
+        <a class="btn btn-ghost" href="{{ url_for('book_detail', book_id=review.book_id) }}">Open book</a>
+    </article>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <p>You have not written any reviews yet.</p>
+    <a class="btn btn-accent" href="{{ url_for('books') }}">Find a book to review</a>
+</div>
+{% endif %}
+{% endblock %}

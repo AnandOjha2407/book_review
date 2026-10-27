@@ -6,10 +6,73 @@
 <section class="welcome-panel">
     <p class="eyebrow">Admin</p>
     <h1>Dashboard</h1>
-    <p class="lead-text">
-        You are signed in as <strong>{{ current_user.username }}</strong> with the admin role.
-        Book management, review moderation and statistics will be added in later stages.
-        This page is only available to administrators.
-    </p>
+    <p class="lead-text">Manage books and moderate reviews. Public averages only include approved reviews.</p>
+    <a class="btn btn-accent" href="{{ url_for('admin_new_book') }}">Add a book</a>
+</section>
+
+<div class="stats-row">
+    <article class="stat-card"><p>Users</p><strong>{{ stats.user_count or 0 }}</strong></article>
+    <article class="stat-card"><p>Books</p><strong>{{ stats.book_count or 0 }}</strong></article>
+    <article class="stat-card"><p>Reviews</p><strong>{{ stats.review_count or 0 }}</strong></article>
+    <article class="stat-card"><p>Approved average</p><strong>{{ avg_rating_display or '—' }}</strong></article>
+</div>
+
+<section class="admin-section">
+    <h2>Pending reviews</h2>
+    {% if pending_reviews %}
+    <div class="review-list">
+        {% for review in pending_reviews %}
+        <article class="review-card">
+            <p class="review-meta">{{ review.username }} on <a href="{{ url_for('book_detail', book_id=review.book_id) }}">{{ review.title }}</a> · ★ {{ review.rating }}</p>
+            <p class="review-text">{{ review.review_text }}</p>
+            <form method="post" action="{{ url_for('admin_moderate_review', review_id=review.id) }}" class="inline-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="btn btn-accent" type="submit" name="action" value="approved">Approve</button>
+                <button class="btn btn-ghost" type="submit" name="action" value="rejected">Reject</button>
+            </form>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No reviews are waiting for moderation.</p></div>
+    {% endif %}
+</section>
+
+<section class="admin-section">
+    <h2>Books</h2>
+    {% if books %}
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Author</th>
+                    <th>Genre</th>
+                    <th>Rating</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for book in books %}
+                <tr>
+                    <td><a href="{{ url_for('book_detail', book_id=book.id) }}">{{ book.title }}</a></td>
+                    <td>{{ book.author }}</td>
+                    <td>{{ book.genre }}</td>
+                    <td>{{ book.avg_rating_display or 'No ratings yet' }}</td>
+                    <td class="table-actions">
+                        <a class="btn btn-ghost" href="{{ url_for('admin_edit_book', book_id=book.id) }}">Edit</a>
+                        <form method="post" action="{{ url_for('admin_delete_book', book_id=book.id) }}" onsubmit="return confirm('Delete this book and its reviews?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button class="btn btn-ghost" type="submit">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No books yet. Add the first title to start the catalogue.</p></div>
+    {% endif %}
 </section>
 {% endblock %}

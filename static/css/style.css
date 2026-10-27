@@ -92,6 +92,23 @@ body {
     color: var(--ink);
 }
 
+.logout-btn {
+    background: none;
+    border: none;
+    width: 100%;
+    text-align: left;
+}
+
+.account-chip {
+    font-family: "Segoe UI", sans-serif;
+    color: var(--ink);
+    text-decoration: none;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+}
+
 .sidebar-footer {
     margin-top: auto;
 }
@@ -208,6 +225,21 @@ body {
     margin-bottom: 2.25rem;
 }
 
+.featured-row > .book-card-link {
+    min-width: 220px;
+}
+
+.book-card-link {
+    color: inherit;
+    text-decoration: none;
+    display: block;
+    height: 100%;
+}
+
+.book-card-link:hover .book-card {
+    border-color: #d3c7bb;
+}
+
 .book-card {
     background: var(--paper);
     border: 1px solid var(--line);
@@ -223,6 +255,13 @@ body {
     place-items: center;
     color: #fff;
     font-size: 2.4rem;
+    overflow: hidden;
+}
+
+.cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .cover-terracotta { background: #c56a4f; }
@@ -273,6 +312,159 @@ body {
     border-color: var(--ink);
 }
 
+.genre-btn {
+    text-decoration: none;
+}
+
+.catalogue-search {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+}
+
+.catalogue-search .search-input {
+    flex: 1;
+    min-width: 200px;
+}
+
+.empty-state,
+.auth-panel,
+.review-form-card,
+.review-card,
+.stat-card {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 1.25rem 1.4rem;
+    box-shadow: var(--shadow);
+}
+
+.empty-state {
+    margin-top: 0.5rem;
+}
+
+.auth-panel {
+    max-width: 32rem;
+}
+
+.wide-panel {
+    max-width: 44rem;
+}
+
+.auth-form .form-control,
+.auth-form .form-select,
+.review-form-card .form-control,
+.review-form-card .form-select {
+    border-radius: 12px;
+    border-color: var(--line);
+    font-family: "Segoe UI", sans-serif;
+}
+
+.auth-switch,
+.muted,
+.result-count,
+.review-meta,
+.status-note,
+.back-link a {
+    font-family: "Segoe UI", sans-serif;
+    color: var(--muted);
+}
+
+.back-link a {
+    text-decoration: none;
+}
+
+.detail-layout {
+    display: grid;
+    grid-template-columns: minmax(180px, 240px) 1fr;
+    gap: 1.75rem;
+    margin: 1rem 0 2rem;
+}
+
+.detail-cover .cover {
+    border-radius: 16px;
+}
+
+.detail-copy h1 {
+    margin: 0.2rem 0 0.4rem;
+}
+
+.meta-list {
+    padding-left: 1.1rem;
+    color: var(--muted);
+    font-family: "Segoe UI", sans-serif;
+}
+
+.book-description {
+    max-width: 42rem;
+    line-height: 1.6;
+}
+
+.inline-form {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.review-section h2,
+.admin-section h2 {
+    margin: 1.5rem 0 1rem;
+}
+
+.review-list {
+    display: grid;
+    gap: 1rem;
+}
+
+.review-text {
+    white-space: pre-wrap;
+    margin-bottom: 0;
+}
+
+.spoiler-hidden {
+    display: none;
+}
+
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.stat-card p {
+    margin: 0;
+    color: var(--muted);
+    font-family: "Segoe UI", sans-serif;
+}
+
+.stat-card strong {
+    font-size: 1.6rem;
+}
+
+.table-wrap {
+    overflow-x: auto;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 0.5rem;
+}
+
+.table-actions {
+    display: flex;
+    gap: 0.4rem;
+    justify-content: flex-end;
+}
+
+.pager {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-top: 1.5rem;
+    font-family: "Segoe UI", sans-serif;
+}
+
 .menu-toggle {
     border: 1px solid var(--line);
     background: #fff;
@@ -304,5 +496,10 @@ body {
         inset: 0;
         background: rgba(31, 26, 23, 0.35);
         z-index: 30;
+    }
+
+    .detail-layout {
+        grid-template-columns: 1fr;
+        max-width: 320px;
     }
 }

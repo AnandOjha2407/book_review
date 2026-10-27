@@ -6,19 +6,13 @@ A straightforward Flask + MySQL book discovery and review website for college su
 
 | Feature | Status |
 | --- | --- |
-| Project skeleton and homepage layout | Implemented (Stage 1) |
-| Database connection and authentication | Pending (Stage 2) |
-| Book catalogue, search, filters, pagination | Pending (Stage 3) |
-| Reviews, ratings and moderation | Pending (Stage 4) |
-| Reading list, comments and votes | Pending (Stage 5) |
-| Recommendations and admin dashboard | Pending (Stage 6) |
-| Final end-to-end testing | Pending (Stage 7) |
-
-## Stage 1 notes
-
-The homepage uses labelled sample book cards so the layout can be reviewed. Those cards are **not** loaded from MySQL yet.
-
-Login, register, reviews, reading list, profile and admin pages are shown in the navigation for layout, but they currently return to the homepage until their stages are built.
+| Project skeleton and homepage layout | Implemented |
+| Database connection and authentication | Implemented |
+| Book catalogue, search, filters, pagination | Implemented |
+| Book details, reviews, ratings and moderation | Implemented |
+| My Reviews, reading list and profile | Implemented |
+| Admin book management | Implemented |
+| Comments, helpful votes and recommendations | Pending |
 
 ## Setup (Windows PowerShell)
 
@@ -42,40 +36,45 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 pip install -r requirements.txt
 ```
 
-4. Copy the example environment file and edit it with your own values:
+4. Copy the example environment file and edit it with your own values. Do not commit `.env`.
 
 ```powershell
 copy .env.example .env
 ```
 
-MySQL is **not required** to view the Stage 1 homepage.
+5. Create or update the database tables (safe to re-run; it does not drop existing data):
 
-5. Run the app:
+```powershell
+python init_db.py
+```
+
+6. Create the first administrator (public registration cannot do this):
+
+```powershell
+python create_admin.py shelfadmin admin@example.com ChangeMe123
+```
+
+7. Run the app:
 
 ```powershell
 python app.py
 ```
 
-6. Open http://127.0.0.1:5000 in a browser.
+8. Open http://127.0.0.1:5000 in a browser.
 
-## Database (used from Stage 2)
+## Adding books
 
-1. Install and start MySQL.
-2. Create a database user or use your local root account.
-3. Fill in `.env` using `.env.example` as a guide. Do not put real passwords in source files.
-4. Run `schema.sql` in MySQL when you are ready to create tables:
+If the catalogue is empty, log in as an administrator, open **Admin Dashboard**, and use **Add a book**. Normal users cannot create books.
 
-```powershell
-mysql -u root -p < schema.sql
-```
-
-Or open MySQL Workbench / the MySQL command line and execute the contents of `schema.sql`.
+New reviews stay **pending** until an administrator approves them. Only approved reviews appear on book pages and in public average ratings.
 
 ## Project files
 
-- `app.py` — Flask app and routes
+- `app.py` — Flask routes
 - `db.py` — MySQL connection helpers
 - `schema.sql` — database tables
+- `init_db.py` — applies the schema without dropping data
+- `create_admin.py` — creates the first admin account
 - `templates/` — HTML pages
 - `static/` — CSS, JavaScript and images
-- `uploads/` — book cover uploads (later stages)
+- `uploads/` — locally uploaded book covers

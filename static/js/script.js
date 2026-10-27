@@ -19,3 +19,15 @@
 
     backdrop.addEventListener("click", closeMenu);
 })();
+
+document.addEventListener("click", function (event) {
+    var button = event.target.closest("[data-reveal-spoiler]");
+    if (!button) {
+        return;
+    }
+    var target = document.getElementById(button.getAttribute("data-reveal-spoiler"));
+    if (target) {
+        target.classList.remove("spoiler-hidden");
+        button.remove();
+    }
+});

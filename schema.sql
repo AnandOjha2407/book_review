@@ -1,5 +1,5 @@
--- OpenShelf database schema (Stage 1: Users, Books, Reviews)
--- Later stages will add comments, votes, wishlist and reading status.
+-- OpenShelf database schema
+-- CREATE TABLE IF NOT EXISTS is safe to run on an existing database.
 
 CREATE DATABASE IF NOT EXISTS book_review_system
   CHARACTER SET utf8mb4
@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(120) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     role ENUM('user', 'admin') NOT NULL DEFAULT 'user',
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY unique_username (username),
     UNIQUE KEY unique_email (email)
@@ -57,4 +58,48 @@ CREATE TABLE IF NOT EXISTS reviews (
         CHECK (rating >= 1.0 AND rating <= 5.0),
     CONSTRAINT chk_review_rating_step
         CHECK (rating * 2 = FLOOR(rating * 2))
+);
+
+CREATE TABLE IF NOT EXISTS reading_list (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    book_id INT NOT NULL,
+    status ENUM('want_to_read', 'currently_reading', 'finished')
+        NOT NULL DEFAULT 'want_to_read',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_user_book_list (user_id, book_id),
+    CONSTRAINT fk_reading_list_user
+        FOREIGN KEY (user_id) REFERENCES users(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_reading_list_book
+        FOREIGN KEY (book_id) REFERENCES books(id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS review_votes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    review_id INT NOT NULL,
+    user_id INT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_user_review_vote (review_id, user_id),
+    CONSTRAINT fk_votes_review
+        FOREIGN KEY (review_id) REFERENCES reviews(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_votes_user
+        FOREIGN KEY (user_id) REFERENCES users(id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS review_comments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    review_id INT NOT NULL,
+    user_id INT NOT NULL,
+    comment_text VARCHAR(1000) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_comments_review
+        FOREIGN KEY (review_id) REFERENCES reviews(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_comments_user
+        FOREIGN KEY (user_id) REFERENCES users(id)
+        ON DELETE CASCADE
 );

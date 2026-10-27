@@ -100,3 +100,66 @@ def list_tables():
     for row in rows:
         names.extend(row.values())
     return names
+
+
+def _column_exists(table_name, column_name):
+    database = os.getenv("DB_NAME", "book_review_system")
+    row = fetch_one(
+        """
+        SELECT COUNT(*) AS total
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s
+        """,
+        (database, table_name, column_name),
+    )
+    return bool(row and row["total"])
+
+
+def apply_migrations():
+    """Add new columns/tables without dropping existing data."""
+    if not _column_exists("users", "is_active"):
+        execute_query(
+            "ALTER TABLE users ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1"
+        )
+    if not _column_exists("reading_list", "status"):
+        execute_query(
+            """
+            ALTER TABLE reading_list
+            ADD COLUMN status ENUM('want_to_read', 'currently_reading', 'finished')
+            NOT NULL DEFAULT 'want_to_read'
+            """
+        )
+    execute_query(
+        """
+        CREATE TABLE IF NOT EXISTS review_votes (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            review_id INT NOT NULL,
+            user_id INT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY unique_user_review_vote (review_id, user_id),
+            CONSTRAINT fk_votes_review
+                FOREIGN KEY (review_id) REFERENCES reviews(id)
+                ON DELETE CASCADE,
+            CONSTRAINT fk_votes_user
+                FOREIGN KEY (user_id) REFERENCES users(id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    execute_query(
+        """
+        CREATE TABLE IF NOT EXISTS review_comments (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            review_id INT NOT NULL,
+            user_id INT NOT NULL,
+            comment_text VARCHAR(1000) NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_comments_review
+                FOREIGN KEY (review_id) REFERENCES reviews(id)
+                ON DELETE CASCADE,
+            CONSTRAINT fk_comments_user
+                FOREIGN KEY (user_id) REFERENCES users(id)
+                ON DELETE CASCADE
+        )
+        """
+    )

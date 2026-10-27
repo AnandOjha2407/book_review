@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}OpenShelf · Profile{% endblock %}
+
+{% block content %}
+<section class="auth-panel">
+    <p class="eyebrow">Account</p>
+    <h1>My profile</h1>
+    <p class="lead-text">Signed in as <strong>{{ current_user.username }}</strong> ({{ current_user.role }}).</p>
+    <p class="muted">Member since {{ current_user.created_at.strftime('%d %b %Y') }}.</p>
+
+    <form method="post" class="auth-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="mb-3">
+            <label class="form-label" for="username">Username</label>
+            <input class="form-control" id="username" value="{{ current_user.username }}" disabled>
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="email">Email</label>
+            <input class="form-control" id="email" name="email" type="email" value="{{ form.email }}" required>
+        </div>
+        <button class="btn btn-accent" type="submit">Save email</button>
+    </form>
+</section>
+{% endblock %}

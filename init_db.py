@@ -2,12 +2,13 @@
 
 from mysql.connector import Error
 
-from db import apply_schema, list_tables
+from db import apply_migrations, apply_schema, list_tables
 
 
 def main():
     try:
         apply_schema()
+        apply_migrations()
         tables = list_tables()
     except Error as error:
         print("Could not set up the database.")

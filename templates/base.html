@@ -28,30 +28,19 @@
 
         <nav class="sidebar-nav">
           <p class="nav-label">Browse</p>
-          <a
-            class="nav-link {% if current_page == 'home' %}active{% endif %}"
-            href="{{ url_for('home') }}"
-            >Home</a
-          >
-          <a class="nav-link" href="{{ url_for('home') }}#explore"
-            >Explore Books</a
-          >
+          <a class="nav-link {% if current_page == 'home' %}active{% endif %}" href="{{ url_for('home') }}">Home</a>
+          <a class="nav-link {% if current_page == 'books' %}active{% endif %}" href="{{ url_for('books') }}">Explore Books</a>
 
           {% if is_logged_in %}
           <p class="nav-label">Library</p>
-          <a class="nav-link" href="{{ url_for('home') }}#explore"
-            >My Reviews</a
-          >
-          <a class="nav-link" href="{{ url_for('home') }}#explore"
-            >My Reading List</a
-          >
-          {% endif %} {% if is_admin %}
+          <a class="nav-link {% if current_page == 'my_reviews' %}active{% endif %}" href="{{ url_for('my_reviews') }}">My Reviews</a>
+          <a class="nav-link {% if current_page == 'reading_list' %}active{% endif %}" href="{{ url_for('reading_list') }}">My Reading List</a>
+          <a class="nav-link {% if current_page == 'profile' %}active{% endif %}" href="{{ url_for('profile') }}">My Profile</a>
+          {% endif %}
+
+          {% if is_admin %}
           <p class="nav-label">Admin</p>
-          <a
-            class="nav-link {% if current_page == 'admin' %}active{% endif %}"
-            href="{{ url_for('admin_dashboard') }}"
-            >Admin Dashboard</a
-          >
+          <a class="nav-link {% if current_page == 'admin' %}active{% endif %}" href="{{ url_for('admin_dashboard') }}">Admin Dashboard</a>
           {% endif %}
         </nav>
 
@@ -62,64 +51,50 @@
             <button class="nav-link logout-btn" type="submit">Logout</button>
           </form>
           {% else %}
-          <a class="btn btn-sidebar w-100 mb-2" href="{{ url_for('login') }}"
-            >Login</a
-          >
-          <a
-            class="btn btn-sidebar-outline w-100"
-            href="{{ url_for('register') }}"
-            >Register</a
-          >
+          <a class="btn btn-sidebar w-100 mb-2" href="{{ url_for('login') }}">Login</a>
+          <a class="btn btn-sidebar-outline w-100" href="{{ url_for('register') }}">Register</a>
           {% endif %}
         </div>
       </aside>
 
       <div class="main-wrap">
         <header class="topbar">
-          <button
-            class="btn menu-toggle d-lg-none"
-            type="button"
-            id="menuToggle"
-            aria-label="Open menu"
-          >
+          <button class="btn menu-toggle d-lg-none" type="button" id="menuToggle" aria-label="Open menu">
             Menu
           </button>
-          <form
-            class="search-form"
-            action="{{ url_for('home') }}"
-            method="get"
-            role="search"
-          >
+          <form class="search-form" action="{{ url_for('books') }}" method="get" role="search">
             <input
               class="form-control search-input"
               type="search"
               name="q"
+              value="{{ search|default('') }}"
               placeholder="Search titles or authors"
               aria-label="Search books"
             />
           </form>
           <div class="topbar-actions">
             {% if is_logged_in %}
-            <span class="account-chip">{{ current_user.username }}</span>
+            <a class="account-chip" href="{{ url_for('profile') }}">{{ current_user.username }}</a>
             <form method="post" action="{{ url_for('logout') }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <button class="btn btn-ghost" type="submit">Logout</button>
             </form>
             {% else %}
             <a class="btn btn-accent" href="{{ url_for('login') }}">Login</a>
-            <a class="btn btn-ghost" href="{{ url_for('register') }}"
-              >Register</a
-            >
+            <a class="btn btn-ghost" href="{{ url_for('register') }}">Register</a>
             {% endif %}
           </div>
         </header>
 
         <main class="page-content">
-          {% with messages = get_flashed_messages(with_categories=true) %} {% if
-          messages %} {% for category, message in messages %}
-          <div class="alert alert-{{ category }}">{{ message }}</div>
-          {% endfor %} {% endif %} {% endwith %} {% block content %}{% endblock
-          %}
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+              {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+              {% endfor %}
+            {% endif %}
+          {% endwith %}
+          {% block content %}{% endblock %}
         </main>
       </div>
     </div>
