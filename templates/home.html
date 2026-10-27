@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}OpenShelf · Home{% endblock %}
+
+{% block content %}
+<section class="welcome-panel">
+    <p class="eyebrow">Welcome to OpenShelf</p>
+    <h1>Find your next book, then talk about it.</h1>
+    <p class="lead-text">
+        Browse featured titles, filter by genre, and settle in with reviews from other readers.
+        The cards below are sample layout content. Real catalogue data arrives once the database is connected.
+    </p>
+</section>
+
+<section class="featured-section">
+    <div class="section-heading">
+        <h2>Featured this week</h2>
+        <p>A short row of highlighted books.</p>
+    </div>
+    <div class="featured-row">
+        {% for book in featured_books %}
+        <article class="book-card featured-card">
+            <div class="cover cover-{{ book.cover_tone }}" aria-hidden="true">
+                <span>{{ book.title[:1] }}</span>
+            </div>
+            <div class="card-body-copy">
+                <p class="genre-chip">{{ book.genre }}</p>
+                <h3>{{ book.title }}</h3>
+                <p class="author">{{ book.author }}</p>
+                <p class="rating-line">★ {{ book.rating }} · {{ book.reviews }} reviews</p>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+</section>
+
+<section class="explore-section" id="explore">
+    <div class="section-heading">
+        <h2>Explore books</h2>
+        <p>Sample catalogue grid. Genre buttons are for layout only in Stage 1.</p>
+    </div>
+    <div class="genre-filters">
+        {% for genre in genres %}
+        <button class="genre-btn {% if loop.first %}active{% endif %}" type="button">{{ genre }}</button>
+        {% endfor %}
+    </div>
+    <div class="row g-4 book-grid">
+        {% for book in books %}
+        <div class="col-sm-6 col-xl-3">
+            <article class="book-card">
+                <div class="cover cover-{{ book.cover_tone }}" aria-hidden="true">
+                    <span>{{ book.title[:1] }}</span>
+                </div>
+                <div class="card-body-copy">
+                    <p class="genre-chip">{{ book.genre }}</p>
+                    <h3>{{ book.title }}</h3>
+                    <p class="author">{{ book.author }}</p>
+                    <p class="rating-line">★ {{ book.rating }} · {{ book.reviews }} reviews</p>
+                </div>
+            </article>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

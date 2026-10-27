@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}OpenShelf · Admin{% endblock %}
+
+{% block content %}
+<section class="welcome-panel">
+    <p class="eyebrow">Admin</p>
+    <h1>Dashboard</h1>
+    <p class="lead-text">
+        You are signed in as <strong>{{ current_user.username }}</strong> with the admin role.
+        Book management, review moderation and statistics will be added in later stages.
+        This page is only available to administrators.
+    </p>
+</section>
+{% endblock %}
