@@ -1,4 +1,4 @@
-"""Create the OpenShelf database and tables from schema.sql."""
+"""Create missing OpenShelf tables in the configured database."""
 
 from mysql.connector import Error
 

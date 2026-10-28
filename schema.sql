@@ -1,11 +1,6 @@
 -- OpenShelf database schema
--- CREATE TABLE IF NOT EXISTS is safe to run on an existing database.
-
-CREATE DATABASE IF NOT EXISTS book_review_system
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-
-USE book_review_system;
+-- Run against the database selected by DB_NAME. CREATE TABLE IF NOT EXISTS
+-- is safe to run on an existing database.
 
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -14,6 +9,14 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     role ENUM('user', 'admin') NOT NULL DEFAULT 'user',
     is_active TINYINT(1) NOT NULL DEFAULT 1,
+    display_name VARCHAR(80) NULL,
+    bio VARCHAR(500) NULL,
+    favourite_genres VARCHAR(255) NULL,
+    favourite_book VARCHAR(120) NULL,
+    currently_reading VARCHAR(120) NULL,
+    annual_reading_goal SMALLINT UNSIGNED NULL,
+    profile_filename VARCHAR(255) NULL,
+    guidelines_accepted_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY unique_username (username),
     UNIQUE KEY unique_email (email)

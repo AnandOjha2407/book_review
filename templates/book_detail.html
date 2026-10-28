@@ -29,14 +29,22 @@
         {% if is_logged_in %}
         <form method="post" action="{{ url_for('toggle_reading_list', book_id=book.id) }}" class="inline-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            {% if on_list %}
+            <input type="hidden" name="action" value="{% if list_entry %}update{% else %}add{% endif %}">
+            <label class="visually-hidden" for="reading-status">Reading status</label>
+            <select class="form-select reading-status-select" id="reading-status" name="status">
+                {% for status, label in reading_statuses.items() %}
+                <option value="{{ status }}" {% if list_entry and list_entry.status == status %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-accent" type="submit">{% if list_entry %}Update reading list{% else %}Add to reading list{% endif %}</button>
+        </form>
+        {% if list_entry %}
+        <form method="post" action="{{ url_for('toggle_reading_list', book_id=book.id) }}" class="mt-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="action" value="remove">
             <button class="btn btn-ghost" type="submit">Remove from reading list</button>
-            {% else %}
-            <input type="hidden" name="action" value="add">
-            <button class="btn btn-accent" type="submit">Add to reading list</button>
-            {% endif %}
         </form>
+        {% endif %}
         {% else %}
         <p class="muted">Log in to save this book or write a review.</p>
         {% endif %}
@@ -57,7 +65,7 @@
                 <label class="form-label" for="rating">Rating</label>
                 <select class="form-select" id="rating" name="rating" required>
                     {% for value in ratings %}
-                    <option value="{{ value }}" {% if own_review and own_review.rating|float == value|float %}selected{% endif %}>{{ value }} stars</option>
+                    <option value="{{ value }}" {% if own_review and own_review.rating|float == value|float %}selected{% elif not own_review and value|string == '5.0' %}selected{% endif %}>{{ value }} stars</option>
                     {% endfor %}
                 </select>
             </div>
