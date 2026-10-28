@@ -23,6 +23,7 @@
     <div class="review-list">
         {% for review in pending_reviews %}
         <article class="review-card">
+            <span class="status-badge status-pending">Pending review</span>
             <p class="review-meta">{{ review.username }} on <a href="{{ url_for('book_detail', book_id=review.book_id) }}">{{ review.title }}</a> · ★ {{ review.rating }}</p>
             <p class="review-text">{{ review.review_text }}</p>
             <form method="post" action="{{ url_for('admin_moderate_review', review_id=review.id) }}" class="inline-form">
@@ -55,7 +56,7 @@
             <tbody>
                 {% for book in books %}
                 <tr>
-                    <td><a href="{{ url_for('book_detail', book_id=book.id) }}">{{ book.title }}</a></td>
+                    <td><a class="table-book-link" href="{{ url_for('book_detail', book_id=book.id) }}">{{ book.title }}</a></td>
                     <td>{{ book.author }}</td>
                     <td>{{ book.genre }}</td>
                     <td>{{ book.avg_rating_display or 'No ratings yet' }}</td>

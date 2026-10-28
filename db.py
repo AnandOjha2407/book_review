@@ -129,6 +129,20 @@ def apply_migrations():
             NOT NULL DEFAULT 'want_to_read'
             """
         )
+    profile_columns = (
+        ("display_name", "VARCHAR(80) NULL"),
+        ("bio", "VARCHAR(500) NULL"),
+        ("favourite_genres", "VARCHAR(255) NULL"),
+        ("favourite_book", "VARCHAR(120) NULL"),
+        ("currently_reading", "VARCHAR(120) NULL"),
+        ("annual_reading_goal", "SMALLINT UNSIGNED NULL"),
+        ("profile_filename", "VARCHAR(255) NULL"),
+    )
+    for column_name, column_definition in profile_columns:
+        if not _column_exists("users", column_name):
+            execute_query(
+                f"ALTER TABLE users ADD COLUMN {column_name} {column_definition}"
+            )
     execute_query(
         """
         CREATE TABLE IF NOT EXISTS review_votes (

@@ -28,7 +28,21 @@ from db import execute_query, fetch_all, fetch_one
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-only-change-me")
+APP_ENV = os.getenv("APP_ENV", "").strip().lower()
+if APP_ENV not in {"development", "production"}:
+    raise RuntimeError("APP_ENV must be set to either 'development' or 'production'.")
+
+secret_key = os.getenv("FLASK_SECRET_KEY", "").strip()
+if not secret_key:
+    raise RuntimeError("FLASK_SECRET_KEY must be configured before starting OpenShelf.")
+
+app.config.update(
+    SECRET_KEY=secret_key,
+    DEBUG=APP_ENV == "development",
+    SESSION_COOKIE_SECURE=APP_ENV == "production",
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+)
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,50}$")
@@ -38,6 +52,9 @@ ALLOWED_RATINGS = [Decimal("1.0"), Decimal("1.5"), Decimal("2.0"), Decimal("2.5"
 COVER_TONES = ["terracotta", "ink", "sage", "lilac", "coral"]
 ALLOWED_COVER_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 MAX_COVER_BYTES = 2 * 1024 * 1024
+MAX_PROFILE_BIO_LENGTH = 500
+MAX_PROFILE_TEXT_LENGTH = 120
+MAX_READING_GOAL = 500
 PAGE_SIZE = 12
 UPLOAD_FOLDER = Path(__file__).with_name("uploads")
 CURRENT_YEAR = datetime.now().year
@@ -85,7 +102,9 @@ def get_current_user():
     try:
         user = fetch_one(
             """
-            SELECT id, username, email, role, is_active, created_at
+            SELECT id, username, email, role, is_active, created_at,
+                   display_name, bio, favourite_genres, favourite_book,
+                   currently_reading, annual_reading_goal, profile_filename
             FROM users WHERE id = %s
             """,
             (user_id,),
@@ -94,8 +113,9 @@ def get_current_user():
             session.clear()
             return None
         return user
-    except Error:
-        return None
+    except Error as error:
+        app.logger.exception("Current-user lookup failed: %s", error)
+        raise
 
 
 def login_required(view):
@@ -172,6 +192,16 @@ def list_genres():
     return [row["genre"] for row in rows]
 
 
+def list_catalogue_genres():
+    rows = fetch_all("SELECT genre FROM books ORDER BY genre")
+    genres_by_key = {}
+    for row in rows:
+        for genre in (part.strip() for part in (row["genre"] or "").split(",")):
+            if genre:
+                genres_by_key.setdefault(genre.casefold(), genre)
+    return sorted(genres_by_key.values(), key=str.casefold)
+
+
 def query_books(search="", genre="", limit=None, offset=0):
     sql = BOOKS_WITH_STATS + " WHERE 1=1"
     params = []
@@ -180,7 +210,12 @@ def query_books(search="", genre="", limit=None, offset=0):
         like = f"%{search}%"
         params.extend([like, like])
     if genre:
-        sql += " AND b.genre = %s"
+        sql += """
+            AND FIND_IN_SET(
+                %s,
+                REGEXP_REPLACE(TRIM(b.genre), '[[:space:]]*,[[:space:]]*', ',')
+            ) > 0
+        """
         params.append(genre)
     sql += " ORDER BY b.title ASC"
     if limit is not None:
@@ -337,7 +372,12 @@ def count_books(search="", genre=""):
         like = f"%{search}%"
         params.extend([like, like])
     if genre:
-        sql += " AND b.genre = %s"
+        sql += """
+            AND FIND_IN_SET(
+                %s,
+                REGEXP_REPLACE(TRIM(b.genre), '[[:space:]]*,[[:space:]]*', ',')
+            ) > 0
+        """
         params.append(genre)
     row = fetch_one(sql, tuple(params))
     return int(row["total"] if row else 0)
@@ -362,7 +402,7 @@ def save_cover_file(file_storage):
     extension = Path(filename).suffix.lower()
     if extension not in ALLOWED_COVER_EXTS:
         return None, "Cover images must be JPG, PNG, GIF or WEBP."
-    data = file_storage.read()
+    data = file_storage.read(MAX_COVER_BYTES + 1)
     if len(data) > MAX_COVER_BYTES:
         return None, "Cover images must be 2 MB or smaller."
     if not allowed_cover_bytes(data[:16]):
@@ -512,7 +552,7 @@ def books():
     try:
         total = count_books(search, genre)
         book_rows = query_books(search, genre, PAGE_SIZE, offset)
-        genres = list_genres()
+        genres = list_catalogue_genres()
     except Error as error:
         app.logger.exception("Catalogue database error: %s", error)
         flash("Could not load the book catalogue.", "danger")
@@ -688,8 +728,12 @@ def toggle_reading_list(book_id):
         abort(404)
     action = request.form.get("action", "add")
     status = request.form.get("status", "want_to_read")
-    if status not in READING_STATUSES:
-        status = "want_to_read"
+    if action not in {"add", "update", "remove"}:
+        flash("Choose a valid reading-list action.", "danger")
+        return redirect(url_for("book_detail", book_id=book_id))
+    if action != "remove" and status not in READING_STATUSES:
+        flash("Choose a valid reading-list status.", "danger")
+        return redirect(url_for("book_detail", book_id=book_id))
     try:
         if action == "remove":
             execute_query(
@@ -744,6 +788,9 @@ def my_reviews():
 def reading_list():
     user = get_current_user()
     status_filter = request.args.get("status", "").strip()
+    if status_filter and status_filter not in READING_STATUSES:
+        flash("Choose a valid reading-list status.", "warning")
+        return redirect(url_for("reading_list"))
     sql = """
         SELECT b.*, stats.avg_rating, stats.review_count, rl.status AS list_status
         FROM books b
@@ -784,30 +831,98 @@ def reading_list():
 @login_required
 def profile():
     user = get_current_user()
+    fields = (
+        "display_name",
+        "bio",
+        "favourite_genres",
+        "favourite_book",
+        "currently_reading",
+        "annual_reading_goal",
+    )
+
+    def profile_form():
+        form = {field: user.get(field) or "" for field in fields}
+        form["email"] = user["email"]
+        return form
+
     if request.method == "POST":
         if not csrf_ok():
             flash("The form expired. Please try again.", "warning")
             return redirect(url_for("profile"))
         email = request.form.get("email", "").strip().lower()
-        if not EMAIL_PATTERN.fullmatch(email):
-            flash("Please enter a valid email address.", "danger")
-            return render_template("profile.html", form={"email": email}, current_page="profile")
+        form = {field: request.form.get(field, "").strip() for field in fields}
+        form["email"] = email
+        form["display_name"] = form["display_name"] or None
+        form["bio"] = form["bio"] or None
+        form["favourite_genres"] = form["favourite_genres"] or None
+        form["favourite_book"] = form["favourite_book"] or None
+        form["currently_reading"] = form["currently_reading"] or None
+
+        if not EMAIL_PATTERN.fullmatch(email) or len(email) > 120:
+            flash("Please enter a valid email address of 120 characters or fewer.", "danger")
+            return render_template("profile.html", form=form, current_page="profile")
+        if form["display_name"] and len(form["display_name"]) > 80:
+            flash("Display name must be 80 characters or fewer.", "danger")
+            return render_template("profile.html", form=form, current_page="profile")
+        if form["bio"] and len(form["bio"]) > MAX_PROFILE_BIO_LENGTH:
+            flash("Bio must be 500 characters or fewer.", "danger")
+            return render_template("profile.html", form=form, current_page="profile")
+        if form["favourite_genres"] and len(form["favourite_genres"]) > 255:
+            flash("Favourite genres must be 255 characters or fewer.", "danger")
+            return render_template("profile.html", form=form, current_page="profile")
+        for field in ("favourite_book", "currently_reading"):
+            if form[field] and len(form[field]) > MAX_PROFILE_TEXT_LENGTH:
+                flash("Book titles must be 120 characters or fewer.", "danger")
+                return render_template("profile.html", form=form, current_page="profile")
+
+        goal_raw = form["annual_reading_goal"]
+        goal = None
+        if goal_raw:
+            if not goal_raw.isdigit() or not (1 <= int(goal_raw) <= MAX_READING_GOAL):
+                flash("Annual reading goal must be between 1 and 500 books.", "danger")
+                return render_template("profile.html", form=form, current_page="profile")
+            goal = int(goal_raw)
+
+        filename, file_error = save_cover_file(request.files.get("profile_picture"))
+        if file_error:
+            flash(file_error, "danger")
+            return render_template("profile.html", form=form, current_page="profile")
+
+        remove_picture = request.form.get("remove_profile_picture") == "1"
+        profile_filename = filename or (
+            None if remove_picture else user.get("profile_filename")
+        )
         try:
             execute_query(
-                "UPDATE users SET email = %s WHERE id = %s",
-                (email, user["id"]),
+                """
+                UPDATE users
+                SET email = %s, display_name = %s, bio = %s, favourite_genres = %s,
+                    favourite_book = %s, currently_reading = %s,
+                    annual_reading_goal = %s, profile_filename = %s
+                WHERE id = %s
+                """,
+                (
+                    email, form["display_name"], form["bio"], form["favourite_genres"],
+                    form["favourite_book"], form["currently_reading"], goal,
+                    profile_filename, user["id"],
+                ),
             )
+            if (filename or remove_picture) and user.get("profile_filename"):
+                delete_cover_file(user["profile_filename"])
             flash("Your profile was updated.", "success")
             return redirect(url_for("profile"))
         except IntegrityError:
+            delete_cover_file(filename)
             flash("That email is already in use.", "danger")
         except Error as error:
+            delete_cover_file(filename)
             app.logger.exception("Profile update error: %s", error)
             flash("Could not update your profile.", "danger")
-        return render_template("profile.html", form={"email": email}, current_page="profile")
+        form["annual_reading_goal"] = goal_raw
+        return render_template("profile.html", form=form, current_page="profile")
     return render_template(
         "profile.html",
-        form={"email": user["email"]},
+        form=profile_form(),
         current_page="profile",
     )
 
@@ -888,7 +1003,8 @@ def login():
                 """,
                 (identifier, identifier.lower()),
             )
-        except Error:
+        except Error as error:
+            app.logger.exception("Login database error: %s", error)
             flash("Could not reach the database. Please try again later.", "danger")
             return render_template("login.html", identifier=identifier, current_page="login")
 
@@ -1131,7 +1247,7 @@ def admin_moderate_review(review_id):
 def validate_registration(username, email, password, confirm):
     if not USERNAME_PATTERN.fullmatch(username):
         return "Username must be 3-50 letters, numbers or underscores."
-    if not EMAIL_PATTERN.fullmatch(email):
+    if not EMAIL_PATTERN.fullmatch(email) or len(email) > 120:
         return "Please enter a valid email address."
     if len(password) < 8:
         return "Password must be at least 8 characters."
@@ -1143,4 +1259,4 @@ def validate_registration(username, email, password, confirm):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=app.config["DEBUG"])

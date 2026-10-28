@@ -17,12 +17,14 @@
     </form>
 </section>
 
-<div class="genre-filters">
+{% if genres %}
+<nav class="genre-filters catalogue-genre-filters" aria-label="Filter books by genre">
     <a class="genre-btn {% if not selected_genre %}active{% endif %}" href="{{ url_for('books', q=search) }}">All</a>
     {% for genre in genres %}
     <a class="genre-btn {% if selected_genre == genre %}active{% endif %}" href="{{ url_for('books', q=search, genre=genre) }}">{{ genre }}</a>
     {% endfor %}
-</div>
+</nav>
+{% endif %}
 
 {% if books %}
 <p class="result-count">{{ total }} book{% if total != 1 %}s{% endif %} found.</p>

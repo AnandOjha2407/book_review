@@ -74,7 +74,7 @@
           </form>
           <div class="topbar-actions">
             {% if is_logged_in %}
-            <a class="account-chip" href="{{ url_for('profile') }}">{{ current_user.username }}</a>
+            <a class="account-chip" href="{{ url_for('profile') }}">{{ current_user.display_name or current_user.username }}</a>
             <form method="post" action="{{ url_for('logout') }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <button class="btn btn-ghost" type="submit">Logout</button>
