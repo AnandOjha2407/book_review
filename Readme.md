@@ -1,5 +1,5 @@
 # OpenShelf — Online Book Review System
-
+time : 1800h 
 A straightforward Flask + MySQL book discovery and review website for college submission and portfolio use.
 
 ## Feature checklist
