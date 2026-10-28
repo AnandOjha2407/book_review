@@ -30,6 +30,7 @@
           <p class="nav-label">Browse</p>
           <a class="nav-link {% if current_page == 'home' %}active{% endif %}" href="{{ url_for('home') }}">Home</a>
           <a class="nav-link {% if current_page == 'books' %}active{% endif %}" href="{{ url_for('books') }}">Explore Books</a>
+          <a class="nav-link {% if current_page == 'guidelines' %}active{% endif %}" href="{{ url_for('guidelines') }}">Community Guidelines</a>
 
           {% if is_logged_in %}
           <p class="nav-label">Library</p>

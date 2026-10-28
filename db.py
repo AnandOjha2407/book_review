@@ -21,11 +21,6 @@ def _base_config():
     }
 
 
-def get_server_connection():
-    """Connect to MySQL without selecting a database (used to create it)."""
-    return mysql.connector.connect(**_base_config())
-
-
 def get_connection():
     """Open a new MySQL connection using values from the environment."""
     config = _base_config()
@@ -77,9 +72,9 @@ def execute_query(sql, params=None):
 
 
 def apply_schema():
-    """Create the database and tables from schema.sql without dropping data."""
+    """Create missing tables in the configured database without dropping data."""
     sql = SCHEMA_PATH.read_text(encoding="utf-8")
-    connection = get_server_connection()
+    connection = get_connection()
     try:
         cursor = connection.cursor()
         for _result in cursor.execute(sql, multi=True):
@@ -137,6 +132,7 @@ def apply_migrations():
         ("currently_reading", "VARCHAR(120) NULL"),
         ("annual_reading_goal", "SMALLINT UNSIGNED NULL"),
         ("profile_filename", "VARCHAR(255) NULL"),
+        ("guidelines_accepted_at", "TIMESTAMP NULL DEFAULT NULL"),
     )
     for column_name, column_definition in profile_columns:
         if not _column_exists("users", column_name):

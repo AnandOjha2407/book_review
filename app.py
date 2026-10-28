@@ -1,6 +1,7 @@
 import os
 import re
 import secrets
+import shutil
 import uuid
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -10,11 +11,13 @@ from pathlib import Path
 from dotenv import load_dotenv
 from flask import (
     Flask,
+    Response,
     abort,
     flash,
     redirect,
     render_template,
     request,
+    send_file,
     send_from_directory,
     session,
     url_for,
@@ -23,7 +26,26 @@ from mysql.connector import Error, IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
-from db import execute_query, fetch_all, fetch_one
+import bulk_import
+from bulk_import import (
+    GoogleBooksError,
+    ImportValidationError,
+    create_batch,
+    download_cover,
+    image_extension,
+    load_batch,
+    normalized_isbn,
+    normalized_text,
+    parse_csv,
+    remove_batch,
+    save_batch,
+    search_google_books,
+    staged_cover_path,
+    store_staged_cover,
+    validate_book_record,
+    validate_zip_archive,
+)
+from db import execute_query, fetch_all, fetch_one, get_connection
 
 load_dotenv()
 
@@ -42,6 +64,7 @@ app.config.update(
     SESSION_COOKIE_SECURE=APP_ENV == "production",
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
+    MAX_CONTENT_LENGTH=bulk_import.MAX_REQUEST_BYTES,
 )
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -56,17 +79,23 @@ MAX_PROFILE_BIO_LENGTH = 500
 MAX_PROFILE_TEXT_LENGTH = 120
 MAX_READING_GOAL = 500
 PAGE_SIZE = 12
-UPLOAD_FOLDER = Path(__file__).with_name("uploads")
+_upload_folder_setting = Path(os.getenv("UPLOAD_FOLDER", "uploads"))
+UPLOAD_FOLDER = (
+    _upload_folder_setting
+    if _upload_folder_setting.is_absolute()
+    else Path(__file__).parent / _upload_folder_setting
+).resolve()
 CURRENT_YEAR = datetime.now().year
 
 BOOKS_WITH_STATS = """
     SELECT b.*, stats.avg_rating, stats.review_count
     FROM books b
     LEFT JOIN (
-        SELECT book_id, AVG(rating) AS avg_rating, COUNT(*) AS review_count
-        FROM reviews
-        WHERE status = 'approved'
-        GROUP BY book_id
+        SELECT r.book_id, AVG(r.rating) AS avg_rating, COUNT(*) AS review_count
+        FROM reviews r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.status = 'approved' AND u.is_active = 1
+        GROUP BY r.book_id
     ) stats ON stats.book_id = b.id
 """
 REVIEW_SORTS = {
@@ -283,17 +312,20 @@ def trending_books(limit=4):
                COALESCE(recent.recent_count, 0) AS recent_count
         FROM books b
         LEFT JOIN (
-            SELECT book_id, AVG(rating) AS avg_rating, COUNT(*) AS review_count
-            FROM reviews
-            WHERE status = 'approved'
-            GROUP BY book_id
+            SELECT r.book_id, AVG(r.rating) AS avg_rating, COUNT(*) AS review_count
+            FROM reviews r
+            JOIN users u ON u.id = r.user_id
+            WHERE r.status = 'approved' AND u.is_active = 1
+            GROUP BY r.book_id
         ) stats ON stats.book_id = b.id
         LEFT JOIN (
-            SELECT book_id, COUNT(*) AS recent_count
-            FROM reviews
-            WHERE status = 'approved'
-              AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-            GROUP BY book_id
+            SELECT r.book_id, COUNT(*) AS recent_count
+            FROM reviews r
+            JOIN users u ON u.id = r.user_id
+            WHERE r.status = 'approved'
+              AND u.is_active = 1
+              AND r.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            GROUP BY r.book_id
         ) recent ON recent.book_id = b.id
         WHERE COALESCE(recent.recent_count, 0) > 0
         ORDER BY recent.recent_count DESC, stats.avg_rating DESC
@@ -571,6 +603,11 @@ def books():
     )
 
 
+@app.route("/guidelines")
+def guidelines():
+    return render_template("guidelines.html", current_page="guidelines")
+
+
 @app.route("/books/<int:book_id>")
 def book_detail(book_id):
     user = get_current_user()
@@ -593,7 +630,7 @@ def book_detail(book_id):
                 FROM review_votes
                 GROUP BY review_id
             ) v ON v.review_id = r.id
-            WHERE r.book_id = %s AND r.status = 'approved'
+            WHERE r.book_id = %s AND r.status = 'approved' AND u.is_active = 1
             ORDER BY {order_sql}
             """,
             (book_id,),
@@ -795,10 +832,11 @@ def reading_list():
         SELECT b.*, stats.avg_rating, stats.review_count, rl.status AS list_status
         FROM books b
         LEFT JOIN (
-            SELECT book_id, AVG(rating) AS avg_rating, COUNT(*) AS review_count
-            FROM reviews
-            WHERE status = 'approved'
-            GROUP BY book_id
+            SELECT r.book_id, AVG(r.rating) AS avg_rating, COUNT(*) AS review_count
+            FROM reviews r
+            JOIN users u ON u.id = r.user_id
+            WHERE r.status = 'approved' AND u.is_active = 1
+            GROUP BY r.book_id
         ) stats ON stats.book_id = b.id
         JOIN reading_list rl ON rl.book_id = b.id
         WHERE rl.user_id = %s
@@ -941,6 +979,7 @@ def register():
         return redirect(url_for("home"))
 
     form = {"username": "", "email": ""}
+    guidelines_accepted = False
     if request.method == "POST":
         if not csrf_ok():
             flash("The form expired. Please try again.", "warning")
@@ -950,32 +989,63 @@ def register():
         form["email"] = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
         confirm = request.form.get("confirm_password", "")
+        guidelines_accepted = request.form.get("guidelines_agreement") == "1"
+
+        if not guidelines_accepted:
+            flash("You must accept the Community Guidelines to create an account.", "danger")
+            return render_template(
+                "register.html",
+                form=form,
+                guidelines_accepted=guidelines_accepted,
+                current_page="register",
+            )
 
         error = validate_registration(form["username"], form["email"], password, confirm)
         if error:
             flash(error, "danger")
-            return render_template("register.html", form=form, current_page="register")
+            return render_template(
+                "register.html",
+                form=form,
+                guidelines_accepted=guidelines_accepted,
+                current_page="register",
+            )
 
         try:
             execute_query(
                 """
-                INSERT INTO users (username, email, password_hash, role)
-                VALUES (%s, %s, %s, 'user')
+                INSERT INTO users
+                    (username, email, password_hash, role, guidelines_accepted_at)
+                VALUES (%s, %s, %s, 'user', CURRENT_TIMESTAMP)
                 """,
                 (form["username"], form["email"], generate_password_hash(password)),
             )
         except IntegrityError:
             flash("That username or email is already registered.", "danger")
-            return render_template("register.html", form=form, current_page="register")
+            return render_template(
+                "register.html",
+                form=form,
+                guidelines_accepted=guidelines_accepted,
+                current_page="register",
+            )
         except Error as error:
             app.logger.exception("Registration database error: %s", error)
             flash("Could not reach the database. Please try again later.", "danger")
-            return render_template("register.html", form=form, current_page="register")
+            return render_template(
+                "register.html",
+                form=form,
+                guidelines_accepted=guidelines_accepted,
+                current_page="register",
+            )
 
         flash("Account created. You can log in now.", "success")
         return redirect(url_for("login"))
 
-    return render_template("register.html", form=form, current_page="register")
+    return render_template(
+        "register.html",
+        form=form,
+        guidelines_accepted=guidelines_accepted,
+        current_page="register",
+    )
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -1012,7 +1082,10 @@ def login():
             flash("Incorrect username/email or password.", "danger")
             return render_template("login.html", identifier=identifier, current_page="login")
         if not user.get("is_active", 1):
-            flash("This account has been deactivated.", "danger")
+            flash(
+                "This account is suspended. Please contact the site administrator if you believe this is a mistake.",
+                "warning",
+            )
             return render_template("login.html", identifier=identifier, current_page="login")
 
         session.clear()
@@ -1058,12 +1131,17 @@ def admin_dashboard():
                 (SELECT COUNT(*) FROM users) AS user_count,
                 (SELECT COUNT(*) FROM books) AS book_count,
                 (SELECT COUNT(*) FROM reviews) AS review_count,
-                (SELECT AVG(rating) FROM reviews WHERE status = 'approved') AS avg_rating
+                (
+                    SELECT AVG(r.rating)
+                    FROM reviews r
+                    JOIN users u ON u.id = r.user_id
+                    WHERE r.status = 'approved' AND u.is_active = 1
+                ) AS avg_rating
             """
         )
         user_search = request.args.get("user_q", "").strip()
         user_sql = """
-            SELECT id, username, email, role, is_active, created_at
+            SELECT id, username, role, is_active, created_at
             FROM users
         """
         user_params = []
@@ -1086,6 +1164,619 @@ def admin_dashboard():
         stats=stats or {},
         avg_rating_display=format_rating((stats or {}).get("avg_rating")),
         current_page="admin",
+    )
+
+
+@app.route("/admin/users/<int:user_id>")
+@admin_required
+def admin_user_detail(user_id):
+    try:
+        user = fetch_one(
+            """
+            SELECT id, username, role, is_active, created_at, display_name, bio,
+                   favourite_genres, favourite_book, currently_reading,
+                   annual_reading_goal, profile_filename
+            FROM users
+            WHERE id = %s
+            """,
+            (user_id,),
+        )
+        if not user:
+            abort(404)
+
+        reviews = fetch_all(
+            """
+            SELECT r.id, r.rating, r.review_text, r.is_spoiler, r.status,
+                   r.created_at, r.updated_at, b.id AS book_id, b.title, b.author
+            FROM reviews r
+            JOIN books b ON b.id = r.book_id
+            WHERE r.user_id = %s
+            ORDER BY r.updated_at DESC
+            """,
+            (user_id,),
+        )
+        reading_list = fetch_all(
+            """
+            SELECT b.id AS book_id, b.title, b.author, rl.status, rl.created_at
+            FROM reading_list rl
+            JOIN books b ON b.id = rl.book_id
+            WHERE rl.user_id = %s
+            ORDER BY rl.created_at DESC
+            """,
+            (user_id,),
+        )
+    except Error as error:
+        app.logger.exception("Admin user detail error: %s", error)
+        flash("Could not load this user's details.", "danger")
+        return redirect(url_for("admin_dashboard"))
+
+    return render_template(
+        "admin_user.html",
+        profile=user,
+        reviews=reviews,
+        reading_list=reading_list,
+        reading_statuses=READING_STATUSES,
+        current_page="admin",
+    )
+
+
+def set_regular_user_active(user_id, is_active):
+    if not csrf_ok():
+        flash("The form expired. Please try again.", "warning")
+        return redirect(url_for("admin_dashboard"))
+
+    if session.get("user_id") == user_id:
+        flash("You cannot change your own account status.", "danger")
+        return redirect(url_for("admin_dashboard"))
+
+    try:
+        target = fetch_one(
+            "SELECT id, role, is_active FROM users WHERE id = %s",
+            (user_id,),
+        )
+        if not target:
+            abort(404)
+        if target["role"] != "user":
+            flash("Only regular user accounts can be banned or unbanned.", "danger")
+            return redirect(url_for("admin_dashboard"))
+        if bool(target["is_active"]) == is_active:
+            status = "active" if is_active else "banned"
+            flash(f"This account is already {status}.", "warning")
+            return redirect(url_for("admin_dashboard"))
+
+        execute_query(
+            """
+            UPDATE users
+            SET is_active = %s
+            WHERE id = %s AND role = 'user' AND is_active = %s
+            """,
+            (int(is_active), user_id, int(not is_active)),
+        )
+        updated = fetch_one(
+            "SELECT role, is_active FROM users WHERE id = %s",
+            (user_id,),
+        )
+        if not updated or updated["role"] != "user" or bool(updated["is_active"]) != is_active:
+            flash("The account status could not be changed.", "danger")
+            return redirect(url_for("admin_dashboard"))
+    except Error as error:
+        app.logger.exception("Account status update error: %s", error)
+        flash("Could not change the account status.", "danger")
+        return redirect(url_for("admin_dashboard"))
+
+    action = "banned" if not is_active else "unbanned"
+    flash(f"User account {action}.", "success")
+    return redirect(url_for("admin_dashboard"))
+
+
+@app.route("/admin/users/<int:user_id>/ban", methods=["POST"])
+@admin_required
+def admin_ban_user(user_id):
+    return set_regular_user_active(user_id, False)
+
+
+@app.route("/admin/users/<int:user_id>/unban", methods=["POST"])
+@admin_required
+def admin_unban_user(user_id):
+    return set_regular_user_active(user_id, True)
+
+
+def find_duplicate_book(data):
+    isbn = normalized_isbn(data.get("isbn"))
+    title = normalized_text(data.get("title"))
+    author = normalized_text(data.get("author"))
+    duplicate = fetch_one(
+        """
+        SELECT id, title, author, isbn
+        FROM books
+        WHERE (%s <> '' AND REGEXP_REPLACE(UPPER(COALESCE(isbn, '')), '[^0-9X]', '') = %s)
+           OR (
+                REGEXP_REPLACE(LOWER(title), '[^a-z0-9]', '') = %s
+                AND REGEXP_REPLACE(LOWER(author), '[^a-z0-9]', '') = %s
+           )
+        LIMIT 1
+        """,
+        (isbn, isbn, title, author),
+    )
+    if not duplicate:
+        return None
+    if isbn and normalized_isbn(duplicate.get("isbn")) == isbn:
+        return f"ISBN already exists on book #{duplicate['id']}."
+    return f"Matching title and author already exist on book #{duplicate['id']}."
+
+
+def _process_import_row(row, batch_token, zip_images=None):
+    source_data = row.get("data") or {}
+    image_name = (source_data.get("cover_filename") or "").strip()
+    cover_url = (source_data.get("cover_url") or "").strip()
+    data, validation_errors = validate_book_record(source_data)
+    row["errors"].extend(validation_errors)
+    if row["errors"]:
+        return row
+    data["cover_url"] = None
+    row["data"] = data
+    row["duplicate_reason"] = find_duplicate_book(data)
+    if row["duplicate_reason"]:
+        return row
+
+    cover_bytes = None
+    cover_extension = None
+    if zip_images:
+        if image_name:
+            cover_bytes = zip_images.get(Path(image_name.replace("\\", "/")).name.casefold())
+        else:
+            title_key = normalized_text(data["title"])
+            title_matches = [
+                (name, image)
+                for name, image in zip_images.items()
+                if normalized_text(Path(name).stem) == title_key
+            ]
+            if len(title_matches) == 1:
+                _name, cover_bytes = title_matches[0]
+            elif len(title_matches) > 1:
+                row["warnings"].append("Multiple ZIP images match the title; no cover was assigned.")
+        if image_name and not cover_bytes:
+            row["warnings"].append("The requested cover filename was not found in the ZIP.")
+        if cover_bytes:
+            cover_extension = image_extension(cover_bytes)
+
+    if not cover_bytes and cover_url:
+        cover_bytes, cover_extension, download_error = download_cover(cover_url)
+        if download_error:
+            row["warnings"].append(download_error)
+
+    if cover_bytes and cover_extension:
+        row["cover_stage"] = store_staged_cover(batch_token, cover_bytes, cover_extension)
+        row["cover_ready"] = True
+    else:
+        row["cover_ready"] = False
+
+    return row
+
+
+def _render_import_page(**context):
+    defaults = {
+        "current_page": "admin",
+        "search_query": "",
+        "results": [],
+        "search_total": 0,
+        "search_start": 0,
+        "search_token": None,
+        "error_message": None,
+        "summary": None,
+    }
+    defaults.update(context)
+    return render_template("admin_import.html", **defaults)
+
+
+def _render_import_preview(token, manifest):
+    return render_template(
+        "admin_import_preview.html",
+        batch_token=token,
+        records=manifest["records"],
+        current_page="admin",
+        import_kind=manifest["kind"],
+        importable_count=sum(
+            not row.get("errors") and not row.get("duplicate_reason")
+            for row in manifest["records"]
+        ),
+    )
+
+
+def _request_has_valid_csrf():
+    if not csrf_ok():
+        flash("The form expired. Please try again.", "warning")
+        return False
+    return True
+
+
+@app.route("/admin/books/import")
+@admin_required
+def admin_book_import():
+    return _render_import_page()
+
+
+@app.route("/admin/books/import/sample.csv")
+@admin_required
+def admin_book_import_sample():
+    sample = (
+        "Title,Author,ISBN,Description,Genre,Publisher,Publication Year,Cover Filename,Cover URL\n"
+        '"The Left Hand of Darkness","Ursula K. Le Guin","9780441478125",'
+        '"A science fiction novel.","Science Fiction","Ace Books",1969,"left-hand.jpg",\n'
+    )
+    return Response(
+        sample,
+        mimetype="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="openshelf-books-sample.csv"'},
+    )
+
+
+@app.route("/admin/books/import/csv/preview", methods=["POST"])
+@admin_required
+def admin_book_import_csv_preview():
+    if not _request_has_valid_csrf():
+        return redirect(url_for("admin_book_import"))
+    csv_file = request.files.get("csv_file")
+    if not csv_file or not csv_file.filename:
+        return _render_import_page(error_message="Choose a CSV file to preview.")
+    if Path(csv_file.filename).suffix.lower() != ".csv":
+        return _render_import_page(error_message="The metadata file must have a .csv extension.")
+    csv_bytes = csv_file.read(bulk_import.MAX_CSV_BYTES + 1)
+    zip_file = request.files.get("covers_zip")
+    zip_bytes = b""
+    if zip_file and zip_file.filename:
+        if Path(zip_file.filename).suffix.lower() != ".zip":
+            return _render_import_page(error_message="The cover archive must have a .zip extension.")
+        zip_bytes = zip_file.read(bulk_import.MAX_ZIP_BYTES + 1)
+    token = None
+    try:
+        records = parse_csv(csv_bytes)
+        zip_images = validate_zip_archive(zip_bytes) if zip_bytes else {}
+        token = create_batch(session["user_id"], "csv", records)
+        manifest = load_batch(token, session["user_id"])
+        for row in manifest["records"]:
+            _process_import_row(row, token, zip_images)
+        _mark_import_batch_duplicates(manifest["records"])
+        save_batch(token, manifest)
+    except ImportValidationError as error:
+        if token:
+            remove_batch(token)
+        return _render_import_page(error_message=str(error))
+    except Error as error:
+        if token:
+            remove_batch(token)
+        app.logger.exception("Book import preview database error: %s", error)
+        return _render_import_page(error_message="Could not check for existing books.")
+    except OSError as error:
+        if token:
+            remove_batch(token)
+        app.logger.exception("Book import staging error: %s", error)
+        return _render_import_page(error_message="Could not stage this import preview.")
+    except ValueError as error:
+        if token:
+            remove_batch(token)
+        app.logger.warning("Book import preview validation error: %s", error)
+        return _render_import_page(error_message="A cover image could not be safely staged.")
+    return _render_import_preview(token, manifest)
+
+
+@app.route("/admin/books/import/google/search", methods=["POST"])
+@admin_required
+def admin_book_import_google_search():
+    if not _request_has_valid_csrf():
+        return redirect(url_for("admin_book_import"))
+    query = request.form.get("query", "").strip()
+    try:
+        try:
+            start_index = int(request.form.get("start_index", "0"))
+        except ValueError as error:
+            raise GoogleBooksError("Choose a valid Google Books results page.") from error
+        result = search_google_books(
+            query,
+            start_index=start_index,
+            api_key=os.getenv("GOOGLE_BOOKS_API_KEY"),
+        )
+    except GoogleBooksError as error:
+        return _render_import_page(search_query=query, error_message=str(error))
+    except (OSError, ValueError) as error:
+        app.logger.exception("Google Books search connection error: %s", error)
+        return _render_import_page(
+            search_query=query,
+            error_message="Google Books search failed. Try again later.",
+        )
+
+    results = result["results"]
+    search_token = None
+    if results:
+        search_token = create_batch(
+            session["user_id"],
+            "google_search",
+            [{"data": row} for row in results],
+        )
+    if result["total_items"] and not results:
+        error_message = "Google Books returned no usable results for this page."
+    else:
+        error_message = None
+    return _render_import_page(
+        search_query=query,
+        results=results,
+        search_total=result["total_items"],
+        search_start=result["start_index"],
+        search_token=search_token,
+        error_message=error_message,
+    )
+
+
+@app.route("/admin/books/import/google/preview", methods=["POST"])
+@admin_required
+def admin_book_import_google_preview():
+    if not _request_has_valid_csrf():
+        return redirect(url_for("admin_book_import"))
+    search_token = request.form.get("search_token", "")
+    search_batch = load_batch(search_token, session["user_id"])
+    if not search_batch or search_batch.get("kind") != "google_search":
+        return _render_import_page(error_message="Google Books results expired; search again.")
+    selected_ids = set(request.form.getlist("selected_volume_ids"))
+    selected_records = [
+        row for row in search_batch["records"]
+        if row.get("data", {}).get("google_volume_id") in selected_ids
+    ]
+    if not selected_records:
+        return _render_import_page(error_message="Select at least one book to preview.")
+    if len(selected_records) > bulk_import.MAX_BATCH_IMPORT:
+        return _render_import_page(error_message=f"Select no more than {bulk_import.MAX_BATCH_IMPORT} books at once.")
+
+    records = []
+    token = None
+    try:
+        token = create_batch(session["user_id"], "google", [])
+        manifest = load_batch(token, session["user_id"])
+        for row_number, selected in enumerate(selected_records, start=1):
+            row = {
+                "row_number": row_number,
+                "data": selected["data"],
+                "errors": [],
+                "warnings": [],
+                "cover_stage": None,
+            }
+            _process_import_row(row, token)
+            records.append(row)
+        _mark_import_batch_duplicates(records)
+        manifest["records"] = records
+        save_batch(token, manifest)
+    except Error as error:
+        if token:
+            remove_batch(token)
+        app.logger.exception("Google Books import preview database error: %s", error)
+        return _render_import_page(error_message="Could not check for existing books.")
+    except OSError as error:
+        if token:
+            remove_batch(token)
+        app.logger.exception("Google Books import staging error: %s", error)
+        return _render_import_page(error_message="Could not stage selected Google Books records.")
+    except ValueError as error:
+        if token:
+            remove_batch(token)
+        app.logger.warning("Google Books import preview validation error: %s", error)
+        return _render_import_page(error_message="A cover image could not be safely staged.")
+    finally:
+        remove_batch(search_token)
+    return _render_import_preview(token, manifest)
+
+
+@app.route("/admin/books/import/<token>/cover/<filename>")
+@admin_required
+def admin_book_import_cover(token, filename):
+    manifest = load_batch(token, session["user_id"])
+    if not manifest:
+        abort(404)
+    cover_path = staged_cover_path(token, filename)
+    if not cover_path:
+        abort(404)
+    return send_file(cover_path, mimetype={
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+    }[cover_path.suffix.lower()])
+
+
+def _same_imported_book(first, second):
+    first_isbn = normalized_isbn(first.get("isbn"))
+    second_isbn = normalized_isbn(second.get("isbn"))
+    if first_isbn and second_isbn and first_isbn == second_isbn:
+        return True
+    return (
+        normalized_text(first.get("title")) == normalized_text(second.get("title"))
+        and normalized_text(first.get("author")) == normalized_text(second.get("author"))
+    )
+
+
+def _mark_import_batch_duplicates(records):
+    seen = []
+    for row in records:
+        if row.get("errors") or row.get("duplicate_reason"):
+            continue
+        matching_row = next(
+            (
+                previous
+                for previous in seen
+                if _same_imported_book(row["data"], previous["data"])
+            ),
+            None,
+        )
+        if matching_row:
+            row["duplicate_reason"] = (
+                f"Duplicates another row in this import (row {matching_row['row_number']})."
+            )
+        else:
+            seen.append(row)
+
+
+def _insert_import_record(record, token):
+    data = record["data"]
+    cover_stage = record.get("cover_stage")
+    staged_path = staged_cover_path(token, cover_stage) if cover_stage else None
+    if cover_stage and not staged_path:
+        raise OSError("Staged cover image is no longer available.")
+
+    cover_filename = None
+    final_cover_path = None
+    cover_created = False
+    connection = None
+    cursor = None
+    try:
+        if staged_path:
+            extension = image_extension(staged_path.read_bytes())
+            if not extension:
+                raise OSError("Staged cover image is invalid.")
+            UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+            cover_filename = f"{uuid.uuid4().hex}{extension}"
+            final_cover_path = UPLOAD_FOLDER / cover_filename
+            with final_cover_path.open("xb") as destination:
+                cover_created = True
+                with staged_path.open("rb") as source:
+                    shutil.copyfileobj(source, destination)
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO books
+                (title, author, genre, cover_url, cover_filename, description,
+                 isbn, publisher, publication_year)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                data["title"],
+                data["author"],
+                data["genre"],
+                None,
+                cover_filename,
+                data.get("description"),
+                data.get("isbn"),
+                data.get("publisher"),
+                data.get("publication_year"),
+            ),
+        )
+        connection.commit()
+        return cursor.lastrowid
+    except Error:
+        if connection:
+            try:
+                connection.rollback()
+            except Error as rollback_error:
+                app.logger.exception("Could not roll back a failed book import: %s", rollback_error)
+        if cover_created and final_cover_path and final_cover_path.exists():
+            try:
+                final_cover_path.unlink()
+            except OSError as cleanup_error:
+                app.logger.exception("Could not remove a failed book-import cover: %s", cleanup_error)
+        raise
+    except OSError:
+        if connection:
+            try:
+                connection.rollback()
+            except Error as rollback_error:
+                app.logger.exception("Could not roll back a failed book import: %s", rollback_error)
+        if cover_created and final_cover_path and final_cover_path.exists():
+            try:
+                final_cover_path.unlink()
+            except OSError as cleanup_error:
+                app.logger.exception("Could not remove a failed book-import cover: %s", cleanup_error)
+        raise
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Error as error:
+                app.logger.warning("Could not close the book-import cursor: %s", error)
+        if connection:
+            try:
+                connection.close()
+            except Error as error:
+                app.logger.warning("Could not close the book-import connection: %s", error)
+
+
+@app.route("/admin/books/import/<token>/confirm", methods=["POST"])
+@admin_required
+def admin_book_import_confirm(token):
+    if not _request_has_valid_csrf():
+        return redirect(url_for("admin_book_import"))
+    manifest = load_batch(token, session["user_id"])
+    if not manifest or manifest.get("kind") not in {"csv", "google"}:
+        flash("Import preview expired; please prepare it again.", "warning")
+        return redirect(url_for("admin_book_import"))
+
+    imported = skipped = failed = 0
+    imported_records = []
+    skipped_rows = []
+    failed_rows = []
+    for row in manifest["records"]:
+        if row.get("errors"):
+            failed += 1
+            failed_rows.append({
+                "row_number": row.get("row_number"),
+                "title": row.get("data", {}).get("title") or "Untitled row",
+                "reason": "; ".join(row["errors"]),
+            })
+            continue
+        if row.get("duplicate_reason"):
+            skipped += 1
+            skipped_rows.append({
+                "row_number": row.get("row_number"),
+                "title": row.get("data", {}).get("title") or "Untitled row",
+                "reason": row["duplicate_reason"],
+            })
+            continue
+        if any(_same_imported_book(row["data"], existing) for existing in imported_records):
+            skipped += 1
+            skipped_rows.append({
+                "row_number": row.get("row_number"),
+                "title": row.get("data", {}).get("title") or "Untitled row",
+                "reason": "Duplicates another row that was imported in this batch.",
+            })
+            continue
+        try:
+            duplicate_reason = find_duplicate_book(row["data"])
+            if duplicate_reason:
+                skipped += 1
+                skipped_rows.append({
+                    "row_number": row.get("row_number"),
+                    "title": row.get("data", {}).get("title") or "Untitled row",
+                    "reason": duplicate_reason,
+                })
+                continue
+            _insert_import_record(row, token)
+            imported_records.append(row["data"])
+            imported += 1
+        except Error as error:
+            app.logger.exception("Book import insert failed for row %s: %s", row.get("row_number"), error)
+            row["failure"] = "Database insert failed; the row was rolled back."
+            failed_rows.append({
+                "row_number": row.get("row_number"),
+                "title": row.get("data", {}).get("title") or "Untitled row",
+                "reason": row["failure"],
+            })
+            failed += 1
+        except OSError as error:
+            app.logger.warning("Book import file operation failed for row %s: %s", row.get("row_number"), error)
+            row["failure"] = "Cover file could not be saved; no book was imported."
+            failed_rows.append({
+                "row_number": row.get("row_number"),
+                "title": row.get("data", {}).get("title") or "Untitled row",
+                "reason": row["failure"],
+            })
+            failed += 1
+    remove_batch(token)
+    return _render_import_page(
+        summary={
+            "imported": imported,
+            "skipped": skipped,
+            "failed": failed,
+            "skipped_rows": skipped_rows,
+            "failed_rows": failed_rows,
+        }
     )
 
 

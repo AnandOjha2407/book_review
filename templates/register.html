@@ -27,6 +27,12 @@
             <label class="form-label" for="confirm_password">Confirm password</label>
             <input class="form-control" id="confirm_password" name="confirm_password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required>
         </div>
+        <div class="form-check mb-3">
+            <input class="form-check-input" id="guidelines_agreement" name="guidelines_agreement" type="checkbox" value="1" {% if guidelines_accepted %}checked{% endif %} required>
+            <label class="form-check-label" for="guidelines_agreement">
+                I agree to the <a href="{{ url_for('guidelines') }}" target="_blank" rel="noopener">Community Guidelines</a>.
+            </label>
+        </div>
         <button class="btn btn-accent" type="submit">Register</button>
     </form>
     <p class="auth-switch">Already registered? <a href="{{ url_for('login') }}">Log in</a></p>
