@@ -36,7 +36,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 pip install -r requirements.txt
 ```
 
-4. Copy the example environment file and edit it with your own values. Generate a unique secret with `python -c "import secrets; print(secrets.token_hex(32))"` and set it as `FLASK_SECRET_KEY`. Do not use the example placeholder or commit `.env`.
+4. Copy the example environment file and edit it with your own values. Set `DB_USER` and `DB_PASSWORD` to a MySQL account that can access the local database and create/alter its tables; do not assume the account is `root`. Keep `DB_HOST=127.0.0.1` and `DB_PORT=3306` for the usual local MySQL setup, and use the database name you create below for `DB_NAME`. Generate a unique secret with `python -c "import secrets; print(secrets.token_hex(32))"` and set it as `FLASK_SECRET_KEY`. Replace the placeholder before running the app, and do not commit `.env`.
 
 ```powershell
 copy .env.example .env
@@ -44,11 +44,22 @@ copy .env.example .env
 
 `APP_ENV` must be `development` for local work or `production` on the hosting platform. OpenShelf will not start if `FLASK_SECRET_KEY` is missing. In production, session cookies are marked Secure, HttpOnly, and SameSite=Lax.
 
-5. Create the local MySQL database named by `DB_NAME` if it does not already exist. Then create or update the tables (safe to re-run; it does not drop or reset existing data):
+5. Create the local MySQL database named by `DB_NAME` if it does not already exist. With the example `DB_NAME=openshelf_local`, run this in PowerShell, replacing the admin username with an account that has permission to create databases. MySQL will prompt for that account's password:
+
+```powershell
+$mysqlAdminUser = Read-Host "Local MySQL administrator username"
+mysql --user "$mysqlAdminUser" --password -e "CREATE DATABASE IF NOT EXISTS openshelf_local CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+```
+
+If the database already exists, this command leaves its data intact. If `mysql` is not on `PATH`, run the same `CREATE DATABASE IF NOT EXISTS ...` statement in MySQL Workbench or another local MySQL client. The application account configured in `.env` must be allowed to read/write the tables and create/alter them for initialization.
+
+Then create or update the tables (safe to re-run; it does not drop or reset existing data):
 
 ```powershell
 python init_db.py
 ```
+
+Changing `.env` only changes which database OpenShelf connects to. It does not copy books, users, reviews, ratings, or uploaded files from FreeDB; the new local database starts with an empty catalogue.
 
 For a fresh production deployment, first create an empty MySQL database through the hosting provider's dashboard or an administrator account. Use `utf8mb4` with `utf8mb4_unicode_ci` if the provider lets you choose its character set and collation. Set `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` in the hosting platform's environment settings so `DB_NAME` is that database and the account can create and alter tables within it. Then run `python init_db.py` once as a release/setup step. It connects directly to the configured database and creates missing tables and additive columns; it does not create a database, drop tables, truncate records, or reset data. Do not point production settings at your local database.
 

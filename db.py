@@ -12,19 +12,32 @@ load_dotenv()
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
+def _database_name():
+    database = os.getenv("DB_NAME")
+    if not database or not database.strip():
+        raise RuntimeError("DB_NAME must be configured before connecting to MySQL.")
+    return database.strip()
+
+
 def _base_config():
+    user = os.getenv("DB_USER")
+    if not user or not user.strip():
+        raise RuntimeError("DB_USER must be configured before connecting to MySQL.")
+    if "DB_PASSWORD" not in os.environ:
+        raise RuntimeError("DB_PASSWORD must be configured before connecting to MySQL.")
+
     return {
-        "host": os.getenv("DB_HOST", "localhost"),
+        "host": os.getenv("DB_HOST", "127.0.0.1"),
         "port": int(os.getenv("DB_PORT", "3306")),
-        "user": os.getenv("DB_USER", "root"),
-        "password": os.getenv("DB_PASSWORD", ""),
+        "user": user.strip(),
+        "password": os.environ["DB_PASSWORD"],
     }
 
 
 def get_connection():
     """Open a new MySQL connection using values from the environment."""
     config = _base_config()
-    config["database"] = os.getenv("DB_NAME", "book_review_system")
+    config["database"] = _database_name()
     return mysql.connector.connect(**config)
 
 
@@ -98,7 +111,7 @@ def list_tables():
 
 
 def _column_exists(table_name, column_name):
-    database = os.getenv("DB_NAME", "book_review_system")
+    database = _database_name()
     row = fetch_one(
         """
         SELECT COUNT(*) AS total
